@@ -1,0 +1,14 @@
+#nextflow 
+.nextflow*
+
+#Non-test Samplesheets
+Samplesheets/samples_largetest.csv
+
+#ignore work directory
+work
+
+#large test data
+data/*1m*
+
+#results
+results
