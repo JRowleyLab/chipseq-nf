@@ -8,8 +8,6 @@ params.samplesheet = "${baseDir}/Samplesheets/samples_test.csv"
 params.outdir = "${baseDir}/results"
 params.index = "/Zulu/bnolan/Indexes/Bowtie2Index/"
 params.threads = "4"
-// params.merge = ""  //merge replicates
-// params.plusmerge = "" //merge replicates but also calculate methylation/duplicates for individual replicates
 
 
 log.info """\
@@ -81,6 +79,7 @@ index_ch = params.index ? Channel.value(file(params.index)) : index_out_ch
 // Trimming reads with Trim Galore
 
 process trimming {
+    tag "$key"
 
     publishDir "${params.outdir}/trimmed", pattern: "*.fq.gz", mode: 'copy'
 
@@ -133,7 +132,7 @@ process align {
     path(index) from index_ch  
 
     output:
-    tuple val(key), path("*bam") into bam_ch
+    tuple val(key), path("*bam") into bam_ch, bam_ch2
     path("*.bowtie2.log"), optional: true into align_report_ch 
 
     script:
@@ -155,7 +154,6 @@ process align {
 }
 
 
-
 // samtools sort bam files, ready for combining replicates (--merge)
 process samtools_sort {
     tag "$key"
@@ -165,7 +163,7 @@ process samtools_sort {
     tuple val(key), path(bam) from bam_ch
     
     output:
-    tuple val(key), path('*sort.bam') into bam_sorted_key_ch
+    tuple val(key), path('*sort.bam') into bam_groups_ch
 
     
     script:
@@ -175,8 +173,7 @@ process samtools_sort {
 }
 
 
-    // Waits for all bams to finish (could be optimized to proceed when sample group is done), then assigns replicates to group
-bam_sorted_key_ch
+bam_groups_ch
     .map { group_rep, bam ->
                         def(group) = group_rep.split("_")  
                         tuple( group, bam )
@@ -184,14 +181,19 @@ bam_sorted_key_ch
     .groupTuple()
     .map {
         group, bams -> 
-                    tuple( groupKey(group, bams.size()), bams)
+                    if (bams.size() != 1){ //Only keep 'groups' with >1 replicate
+                        tuple( groupKey(group, bams.size()), bams)
+                    }
+                    
     }
     .set{bam_sorted_groups_ch}
 
 
 
 
+
 // Combine replicates based on 'sample_rep' format, all 'sample' bam files will be merged
+// Only combine replicates if there are replicates for that sample.
 process combine_replicates {
     tag "$group"
     publishDir "${params.outdir}/samtools/merge/${group}/", pattern:'*', mode: 'copy'
@@ -208,6 +210,13 @@ process combine_replicates {
     """
 }
   
+//mix replicates with merged groups
+
+bam_ch2
+        .mix(bam_merged_groups_ch)
+        .set{bam_all_ch}
+        
+
 
 
 // samtools index merged (--merge) bam files
@@ -216,7 +225,7 @@ process samtools_sort2 {
     publishDir "${params.outdir}/samtools/bam/${key}/", pattern:'*', mode: 'copy'
 
     input:
-    tuple val(key), path(bam) from bam_merged_groups_ch
+    tuple val(key), path(bam) from bam_all_ch
     
     output:
     tuple val(key), path('*sort.bam') into bam_sorted_channel, bam_sorted_channel2, bam_sorted_channel3
@@ -301,6 +310,7 @@ process samtools_index {
     """
 }
 
+// Add bai to bam channel for bamCoverage
 dedup_bam_ch2
             .join(bam_indexed_channel)
             .set{dedup_indexed_ch}
@@ -324,13 +334,15 @@ process bamCoverage {
 }
 
 
+
 // Identify Input for each Control / Treatment and create channels
 // need: [sample, ipbam, controlbam]
 // based on file name containing -input
 
+
 dedup_bam_ch3 
         .map { sample, bam ->
-                        def(group) = sample.split("-")
+                        def group = sample.minus('-input')
                         tuple(group, bam)
                         }
         .groupTuple(size: 2)
@@ -343,8 +355,7 @@ dedup_bam_ch3
                             tuple( group, bams[0], bams[1])
                         }
         }
-        .set { bam_ip_input_ch } 
-
+        .set {bam_ip_input_ch } 
 
 
 // macs2
@@ -377,8 +388,6 @@ peak_count_header_ch = Channel.fromPath("$projectDir/peak_count_header.txt", che
 
 
 process MULTIQC_CUSTOM_PEAKS {
-    publishDir "${params.outdir}/multiqc/", pattern:"*", mode: 'copy'
-
     //nfcore/chipseq
     tag "$key" 
 
@@ -450,6 +459,9 @@ process manorm{
              -o ${key_treatment}v${key_control}_dir
     """ 
 }
+
+
+
 
 
 // Create multiqc report channel
