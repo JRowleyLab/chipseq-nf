@@ -405,34 +405,50 @@ process MULTIQC_CUSTOM_PEAKS {
 }
 
 
+process bamToBed {
+    tag "$key" 
+
+    input:
+    tuple val(key), path(peak), path(bam) from peaks_bam_ch2
+
+    output:
+    tuple val(key), path(peak), path("*.bed") into bed_ch, bed_ch2 
+
+    script:
+    """
+    bamToBed -i $bam > ${key}.bed
+    """
+}
+
+
 // Create channel that joins 'control narrowPeak AND bam' with each treatment narrowPeak AND bam
 // input 
 // [T1, [T1.bam, T1.narrowPeak], [control.bam, control.narrowPeak]] ...
 
 
 // Control
-peaks_bam_ch2
+bed_ch
             .map {
-                    group, peak, bam ->
+                    group, peak, bed ->
                                 if(group.contains('control')) {
-                                    tuple( group, peak, bam )
+                                    tuple( group, peak, bed )
                                 } 
                     }
-                    .set { control_peaks_bam_ch } 
+                    .set { control_peaks_bed_ch } 
 
 // Treatments
-peaks_bam_ch3
+bed_ch2
             .map {
-                    group, peak, bam ->
+                    group, peak, bed ->
                                 if(!group.contains('control')) {
-                                    tuple( group, peak, bam )
+                                    tuple( group, peak, bed )
                                 } 
                     }
-                    .set { treatment_peaks_bam_ch } 
+                    .set { treatment_peaks_bed_ch } 
 
 // Combine Treatment with Control
-treatment_peaks_bam_ch
-                    .combine(control_peaks_bam_ch)
+treatment_peaks_bed_ch
+                    .combine(control_peaks_bed_ch)
                     .set {treat_cont_ch}
 
 
@@ -443,7 +459,7 @@ process manorm{
     publishDir "${params.outdir}/manorm/${key_treatment}", pattern:"*", mode: 'copy'
 
     input:
-    tuple val(key_treatment), path(peaks_treatment), path(bam_treatment), val(key_control), path(peaks_control), path(bam_control) from treat_cont_ch
+    tuple val(key_treatment), path(peaks_treatment), path(bed_treatment), val(key_control), path(peaks_control), path(bed_control) from treat_cont_ch
 
     output:
     path('*_dir') into manorm_dir_ch
@@ -453,9 +469,10 @@ process manorm{
     manorm \\
             --p1 $peaks_treatment \\
             --p2 $peaks_control \\
-             --r1 $bam_treatment \\
-             --r2 $bam_control \\
-             --rf bam \\
+             --r1 $bed_treatment \\
+             --r2 $bed_control \\
+             --pf narrowpeak \\
+             --rf bed \\
              -o ${key_treatment}v${key_control}_dir
     """ 
 }
