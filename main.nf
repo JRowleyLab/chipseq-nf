@@ -3,11 +3,12 @@
  */
 
 //params.genome = "/Zulu/bnolan/Indexes/bwaIndex/hg38.fa"
-params.controlname = "control"
+//params.controlname = "control"
 params.samplesheet = "${baseDir}/Samplesheets/samples_test.csv"
 params.outdir = "${baseDir}/results"
 params.index = "/Zulu/bnolan/Indexes/Bowtie2Index/"
 params.threads = "4"
+//params.manormGroup = ""
 
 
 log.info """\
@@ -97,7 +98,7 @@ process trimming {
                 ${reads[0]} \\
                 ${reads[1]} \\
                 --basename $key \\
-                --cores 2 
+                --cores 1 
     """
 }
 
@@ -154,97 +155,13 @@ process align {
 }
 
 
-// samtools sort bam files, ready for combining replicates (--merge)
-process samtools_sort {
-    tag "$key"
-    publishDir "${params.outdir}/samtools/", pattern:'*', mode: 'copy'
-
-    input:
-    tuple val(key), path(bam) from bam_ch
-    
-    output:
-    tuple val(key), path('*sort.bam') into bam_groups_ch
-
-    
-    script:
-    """
-    samtools sort $bam > ${key}.sort.bam
-    """
-}
-
-
-bam_groups_ch
-    .map { group_rep, bam ->
-                        def(group) = group_rep.split("_")  
-                        tuple( group, bam )
-                        }
-    .groupTuple()
-    .map {
-        group, bams -> 
-                    if (bams.size() != 1){ //Only keep 'groups' with >1 replicate
-                        tuple( groupKey(group, bams.size()), bams)
-                    }
-                    
-    }
-    .set{bam_sorted_groups_ch}
-
-
-
-
-
-// Combine replicates based on 'sample_rep' format, all 'sample' bam files will be merged
-// Only combine replicates if there are replicates for that sample.
-process combine_replicates {
-    tag "$group"
-    publishDir "${params.outdir}/samtools/merge/${group}/", pattern:'*', mode: 'copy'
-
-    input:
-    tuple val(group), path(bams) from bam_sorted_groups_ch
-
-    output:
-    tuple val(group), file("*.merged.bam") into bam_merged_groups_ch
-
-    script:
-    """
-    samtools merge -n ${group}.merged.bam $bams 
-    """
-}
-  
-//mix replicates with merged groups
-
-bam_ch2
-        .mix(bam_merged_groups_ch)
-        .set{bam_all_ch}
-        
-
-
-
-// samtools index merged (--merge) bam files
-process samtools_sort2 {
-    tag "$key"
-    publishDir "${params.outdir}/samtools/bam/${key}/", pattern:'*', mode: 'copy'
-
-    input:
-    tuple val(key), path(bam) from bam_all_ch
-    
-    output:
-    tuple val(key), path('*sort.bam') into bam_sorted_channel, bam_sorted_channel2, bam_sorted_channel3
-
-    script:
-    """
-    samtools sort $bam > ${key}.sort.bam
-    """
-
-} 
-
-
 // Samtools stats for summary statistics on bwa-meth alignment
 process samtools_stat_flagstat {
     tag "$key"
     publishDir "${params.outdir}/samtools/stats/", pattern:'*', mode: 'copy'
 
     input:
-    tuple val(key), path(bam) from bam_sorted_channel
+    tuple val(key), path(bam) from bam_ch
 
 
     output:
@@ -267,14 +184,33 @@ process samtools_stat_flagstat {
 }
 
 
-// Deduplicate bam files with picard
 
+// samtools index
+process samtools_sort {
+    tag "$key"
+    publishDir "${params.outdir}/samtools/bam/${key}/", pattern:'*', mode: 'copy'
+
+    input:
+    tuple val(key), path(bam) from bam_ch2
+    
+    output:
+    tuple val(key), path('*sort.bam') into bam_sorted_channel
+
+    script:
+    """
+    samtools sort $bam > ${key}.sort.bam
+    """
+
+} 
+
+
+// Deduplicate bam files with picard
 process deduplication{
     tag "$key"
     publishDir "${params.outdir}/picard/$key", pattern:"*", mode: 'copy'
 
     input:
-    tuple val(key), path(bam) from bam_sorted_channel3 
+    tuple val(key), path(bam) from bam_sorted_channel 
     
     output:
     tuple val(key), path("*.deduplicated.bam") into dedup_bam_ch, dedup_bam_ch2, dedup_bam_ch3
@@ -291,17 +227,95 @@ process deduplication{
     """
 }
 
- 
+
+//Combine replicates: split by '_', and group all samples
+dedup_bam_ch
+    .map { group_rep, bam ->
+                        def(group) = group_rep.split("_")  
+                        tuple( group, bam )
+                        }
+    .groupTuple()
+    .into { dedup_groupsplit_ch; dedup_groupsplit_ch2 }
+
+// Keep groups with more than 1 replicate, ready for combine replicates
+dedup_groupsplit_ch
+        .map {
+            group, bams -> 
+                        if (bams.size() != 1){ //Only keep 'groups' with >1 replicate
+                            tuple( groupKey(group, bams.size()), bams)
+                        }
+        }
+        .set{bam_sorted_groups_ch}
+
+// Keep the individual replicates for inputs, if group has 1 replicate
+dedup_groupsplit_ch2
+        .map {
+            group, bams -> 
+                        if (bams.size() == 1 & group.contains('input')){ //Only keep 'groups' with >1 replicate
+                            tuple( groupKey(group, bams.size()), bams)
+                        }
+                }
+        .set{bam_single_inputs_ch}
+
+
+// Combine replicates based on 'sample_rep' format, all 'sample' bam files will be merged
+// Only combine replicates if there are replicates for that sample.
+process combine_replicates {
+    tag "$group"
+    publishDir "${params.outdir}/samtools/merge/${group}/", pattern:'*', mode: 'copy'
+
+    input:
+    tuple val(group), path(bams) from bam_sorted_groups_ch
+
+    output:
+    tuple val(group), file("*.merged.bam") into bam_merged_groups_ch
+
+    script:
+    """
+    samtools merge -n ${group}.merged.bam $bams 
+    """
+}
+  
+
+//mix replicates with merged groups. If any inputs could be merged (per cell type), use the merged inputs for all further samples of that group
+//Preferentially, only use merged inputs, if only 1 input is given for a cell type/ group, then use that one
+
+
+dedup_bam_ch2 //deduplicated bam files
+        .filter{ !it[0].contains('-input') } //remove all input files
+        .mix(bam_merged_groups_ch) //add merged inputs and IPs
+        .mix(bam_single_inputs_ch) //add any individual replicates
+        .set{bams_all_ch} //all input and IP bam files: tuple [sample, bam]
+
+
+// samtools sort bam files
+process samtools_sort2 {
+    tag "$key"
+    publishDir "${params.outdir}/samtools/", pattern:'*', mode: 'copy'
+
+    input:
+    tuple val(key), path(bam) from bams_all_ch
+    
+    output:
+    tuple val(key), path('*sort.bam') into bams_sorted_ch, bams_sorted_ch2, bams_sorted_ch3
+
+    
+    script:
+    """
+    samtools sort $bam > ${key}.sort.bam
+    """
+}
+
 
 process samtools_index {
     tag "$key"
     publishDir "${params.outdir}/samtools/bam/${key}/", pattern:'*', mode: 'copy'
 
     input:
-    tuple val(key), path(bam) from dedup_bam_ch
+    tuple val(key), path(bam) from bams_sorted_ch
 
     output:
-    tuple val(key), path('*bai') into bam_indexed_channel
+    tuple val(key), path('*bai') into bam_indexed_ch
 
     script:
 
@@ -310,10 +324,11 @@ process samtools_index {
     """
 }
 
+
 // Add bai to bam channel for bamCoverage
-dedup_bam_ch2
-            .join(bam_indexed_channel)
-            .set{dedup_indexed_ch}
+bams_sorted_ch2
+            .join(bam_indexed_ch)
+            .set{bam_sorted_indexed_ch}
 
 
 
@@ -322,7 +337,7 @@ process bamCoverage {
     publishDir "${params.outdir}/bamCoverage/$key", pattern:"*", mode: 'copy'
 
     input:
-    tuple val(key), path(bam), path(bai) from dedup_indexed_ch
+    tuple val(key), path(bam), path(bai) from bam_sorted_indexed_ch
 
     output:
     tuple val(key), path("*.bw") into bw_ch
@@ -340,22 +355,46 @@ process bamCoverage {
 // based on file name containing -input
 
 
-dedup_bam_ch3 
-        .map { sample, bam ->
-                        def group = sample.minus('-input')
-                        tuple(group, bam)
-                        }
-        .groupTuple(size: 2)
-        .map {
-            group, bams ->
-                        if(bams[0].getName().contains('-input')) {
-                            tuple( group, bams[1], bams[0])
-                        } 
-                        else if(bams[1].getName().contains('-input')) {
-                            tuple( group, bams[0], bams[1])
-                        }
+//TODO: combine inputs with bam files for each sample. 
+bams_sorted_ch3 
+        .branch{
+            input: it[0].contains('input')
+            ip: !it[0].contains('input')
         }
-        .set {bam_ip_input_ch } 
+        .set {result}
+
+//all combinations,  then filter based on ones that the key and second key match string.
+//`DKO-input` -> split to `DKO`, then see if `DKO` is in ip string (`DKO_A`): yes
+result.ip
+        .combine(result.input)
+        .map{
+            ip, bam, input, bam2 ->
+                            def group = input.minus(~/-.*/)
+                            if(ip.contains(group)){
+                                tuple(ip, bam, bam2)
+                            }
+
+        }
+        .set{ ipbam_inputbam_ch }
+
+        // .map { sample, bam ->
+        //                 def group = sample.minus('-input').minus(~/_.*/)
+        //                 tuple(group, bam)
+        //                 }
+        // .groupTuple(size: 2)
+        // .view()
+        // .map {
+        //     group, bams ->
+        //                 if(bams[0].getName().contains('-input')) {
+        //                     tuple( group, bams[1], bams[0])
+        //                 } 
+        //                 else if(bams[1].getName().contains('-input')) {
+        //                     tuple( group, bams[0], bams[1])
+        //                 }
+        // }
+        // .set {bam_ip_input_ch } 
+
+// bam_ip_input_ch.view()
 
 
 // macs2
@@ -365,7 +404,7 @@ process macs2 {
     publishDir "${params.outdir}/macs2/$key", pattern:"*", mode: 'copy'
 
     input:
-    tuple val(key), path(bamip), path(baminput) from bam_ip_input_ch
+    tuple val(key), path(bamip), path(baminput) from ipbam_inputbam_ch
 
     output:
     tuple val(key), path("*.narrowPeak"), path(bamip) into peaks_bam_ch, peaks_bam_ch2, peaks_bam_ch3
@@ -383,6 +422,7 @@ process macs2 {
             --call-summits 
     """ 
 }
+
 
 peak_count_header_ch = Channel.fromPath("$projectDir/peak_count_header.txt", checkIfExists: true).toList()
 
@@ -451,6 +491,43 @@ treatment_peaks_bed_ch
                     .combine(control_peaks_bed_ch)
                     .set {treat_cont_ch}
 
+// Concept for allowing MAnorm to compare combinations of all samples. Need to handle this correctly to avoid huge numbers of comparisons.
+// if (params.manormGroup){
+//     // Control
+//     bed_ch
+//                 .map {
+//                         group, peak, bed ->
+//                                     if(group.contains('control')) {
+//                                         tuple( group, peak, bed )
+//                                     } 
+//                         }
+//                         .set { control_peaks_bed_ch } 
+
+//     // Treatments
+//     bed_ch2
+//                 .map {
+//                         group, peak, bed ->
+//                                     if(!group.contains('control')) {
+//                                         tuple( group, peak, bed )
+//                                     } 
+//                         }
+//                         .set { treatment_peaks_bed_ch } 
+
+//     // Combine Treatment with Control
+//     treatment_peaks_bed_ch
+//                         .combine(control_peaks_bed_ch)
+//                         .set {treat_cont_ch}
+// }else{
+//     bed_ch
+//         .combine(bed_ch2)
+//         .map {
+//             group, peak, bed, group2, peak2, bed2 ->
+//                                             if(!group.contains(group2)) {
+//                                                 tuple ( group,  group2 )
+//                                             }
+//         }
+//         .set {treat_cont_ch}
+// }
 
 // manorm
 
@@ -476,9 +553,6 @@ process manorm{
              -o ${key_treatment}v${key_control}_dir
     """ 
 }
-
-
-
 
 
 // Create multiqc report channel
