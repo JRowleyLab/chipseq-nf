@@ -4,7 +4,7 @@
 
 //params.genome = "/Zulu/bnolan/Indexes/bwaIndex/hg38.fa"
 //params.controlname = "control"
-params.samplesheet = "${baseDir}/Samplesheets/samples_test.csv"
+params.samplesheet = "${baseDir}/Samplesheets/samples_largetest.csv"
 params.outdir = "${baseDir}/results"
 params.index = "/Zulu/bnolan/Indexes/Bowtie2Index/"
 params.threads = "4"
@@ -370,12 +370,14 @@ result.ip
         .map{
             ip, bam, input, bam2 ->
                             def group = input.minus(~/-.*/)
-                            if(ip.contains(group)){
+			    def ipgroup = ip.minus(~/_.*/)
+                            if(ipgroup.equals(group)){
                                 tuple(ip, bam, bam2)
                             }
 
         }
         .set{ ipbam_inputbam_ch }
+
 
         // .map { sample, bam ->
         //                 def group = sample.minus('-input').minus(~/_.*/)

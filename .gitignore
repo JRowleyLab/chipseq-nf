@@ -2,7 +2,8 @@
 .nextflow*
 
 #Non-test Samplesheets
-Samplesheets/samples_largetest.csv
+Samplesheets/*
+!Samplesheets/samples_largetest.csv
 
 #ignore work directory
 work
