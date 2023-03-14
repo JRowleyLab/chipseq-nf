@@ -149,7 +149,7 @@ process align {
                 -1 ${reads[0]} \\
                 -2 ${reads[1]} \\
                 2> ${key}.bowtie2.log \\
-                | samtools view -@ $params.threads -bhS -o ${key}.bam -
+                | samtools view -@ $params.threads -bhS -q 10 -o ${key}.bam -
                 
         """  
 }
