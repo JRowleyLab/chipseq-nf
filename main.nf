@@ -4,11 +4,10 @@
 
 //params.genome = "/Zulu/bnolan/Indexes/bwaIndex/hg38.fa"
 //params.controlname = "control"
-params.samplesheet = "${baseDir}/Samplesheets/samples_largetest.csv"
+params.samplesheet = "${baseDir}/Samplesheets/samples_largetest_inputDependent2.csv"
 params.outdir = "${baseDir}/results"
 params.index = "/Zulu/bnolan/Indexes/Bowtie2Index/"
 params.threads = "4"
-//params.manormGroup = ""
 
 
 log.info """\
@@ -23,13 +22,68 @@ log.info """\
          """
          .stripIndent()
 
+         
+
+index_ch = Channel.value(file(params.index))
+
 
 // Parse samplesheet and create reads channel            
 Channel
         .from ( file(params.samplesheet) )
         .splitCsv(header:true, sep:',')
-        .map { row -> [ row.sample_id, [ file(row.fastq_1, checkIfExists: true), file(row.fastq_2, checkIfExists: true) ]] }
-        .into { read_pairs_ch; read_pairs_ch2 }
+        .map { row -> [ row.sample_id, [ file(row.fastq_1, checkIfExists: true), file(row.fastq_2, checkIfExists: true) ], row.input] }
+        .set { read_pairs_ch }
+
+
+// // Concatenate reads of same sample [e.g. additional lanes, resequencing of old samples]
+//nfcore
+read_pairs_ch
+        .groupTuple()
+        .branch {
+            meta, fastq, input ->
+                single  : fastq.size() == 1
+                    return [ meta, fastq.flatten(), input.flatten() ]
+                multiple: fastq.size() > 1
+                    return [ meta, fastq.flatten(), input.flatten() ]
+        }
+        .set { ch_fastq }  
+
+
+process CAT_FASTQ {
+    //nf-core
+    tag "$sample_id"
+    publishDir "${params.outdir}/fastqMerged", mode: 'copy'
+
+    input:
+    tuple val(sample_id), path(reads, stageAs: "input*/*"), val(input) from ch_fastq.multiple
+
+    output:
+    tuple val(sample_id), path("*.merged.fastq.gz"), val(input) into cat_out_ch
+
+
+    script:
+    def readList = reads instanceof List ? reads.collect{ it.toString() } : [reads.toString()]
+
+     if (readList.size >= 2) {
+        def read1 = []
+        def read2 = []
+        readList.eachWithIndex{ v, ix -> ( ix & 1 ? read2 : read1 ) << v }
+
+        """
+        cat ${read1.join(' ')} > ${sample_id}_1.merged.fastq.gz
+        cat ${read2.join(' ')} > ${sample_id}_2.merged.fastq.gz
+        """  
+     }
+}
+
+
+
+//mix merged reads with singles
+cat_out_ch
+        .mix(ch_fastq.single)
+        .into { cat_merged_ch; cat_merged_ch2 }
+
+
 
 //  Run fastQC to check quality of reads files
 
@@ -38,7 +92,7 @@ process fastqc {
     publishDir "${params.outdir}/fastqc", pattern:"{*.html,fastqc_${sample_id}_logs}", mode: 'copy'
 
     input:
-    tuple val(sample_id), path(reads) from read_pairs_ch
+    tuple val(sample_id), path(reads), val(input) from cat_merged_ch
 
     output:
     path("fastqc_${sample_id}_logs") into fastqc_ch
@@ -50,32 +104,6 @@ process fastqc {
     """  
 }
 
-// Download index if none
-
-process index {
-
-    publishDir "${params.outdir}/${params.aligner}/index", mode: 'copy'
-    
-    input:
-
-    when:
-    !params.index
-     
-    output:
-    path 'GRCh38_noalt_as' into index_out_ch
-
-    script:       
-        """
-        wget https://genome-idx.s3.amazonaws.com/bt/GRCh38_noalt_as.zip
-        unzip GRCh38_noalt_as.zip
-        """
-
-}
-
-
-index_ch = params.index ? Channel.value(file(params.index)) : index_out_ch
-
-
 
 // Trimming reads with Trim Galore
 
@@ -85,10 +113,10 @@ process trimming {
     publishDir "${params.outdir}/trimmed", pattern: "*.fq.gz", mode: 'copy'
 
     input: 
-    tuple val(key), path(reads) from read_pairs_ch2
+    tuple val(key), path(reads), val(input) from cat_merged_ch2
 
     output:
-    tuple val(key), path("*.fq.gz") into ch_out_trimmomatic, ch_out_trimmomatic2
+    tuple val(key), path("*.fq.gz"), val(input) into ch_out_trimmomatic, ch_out_trimmomatic2
 
     script:
 
@@ -109,7 +137,7 @@ process fastqc_trimmed {
     publishDir "${params.outdir}/fastqc_trimmed", pattern:"{*.html,fastqc_${sample_id}_trimmed_logs}", mode: 'copy'
 
     input:
-    tuple val(sample_id), path(reads) from ch_out_trimmomatic
+    tuple val(sample_id), path(reads), val(input) from ch_out_trimmomatic
 
     output:
     path("fastqc_${sample_id}_trimmed_logs") into fastqc_trimmed_ch
@@ -129,11 +157,11 @@ process align {
     publishDir "${params.outdir}/alignment/$key/", pattern:'*', mode: 'copy'
 
     input:
-    tuple val(key), path(reads) from ch_out_trimmomatic2
+    tuple val(key), path(reads), val(input) from ch_out_trimmomatic2
     path(index) from index_ch  
 
     output:
-    tuple val(key), path("*bam") into bam_ch, bam_ch2
+    tuple val(key), path("*bam"), val(input) into bam_ch, bam_ch2
     path("*.bowtie2.log"), optional: true into align_report_ch 
 
     script:
@@ -149,7 +177,7 @@ process align {
                 -1 ${reads[0]} \\
                 -2 ${reads[1]} \\
                 2> ${key}.bowtie2.log \\
-                | samtools view -@ $params.threads -bhS -o ${key}.bam -
+                | samtools view -@ $params.threads -bhS -q 10 -o ${key}.bam -
                 
         """  
 }
@@ -161,7 +189,7 @@ process samtools_stat_flagstat {
     publishDir "${params.outdir}/samtools/stats/", pattern:'*', mode: 'copy'
 
     input:
-    tuple val(key), path(bam) from bam_ch
+    tuple val(key), path(bam), val(input) from bam_ch
 
 
     output:
@@ -191,10 +219,10 @@ process samtools_sort {
     publishDir "${params.outdir}/samtools/bam/${key}/", pattern:'*', mode: 'copy'
 
     input:
-    tuple val(key), path(bam) from bam_ch2
+    tuple val(key), path(bam), val(input) from bam_ch2
     
     output:
-    tuple val(key), path('*sort.bam') into bam_sorted_channel
+    tuple val(key), path('*sort.bam'), val(input) into bam_sorted_channel
 
     script:
     """
@@ -210,10 +238,10 @@ process deduplication{
     publishDir "${params.outdir}/picard/$key", pattern:"*", mode: 'copy'
 
     input:
-    tuple val(key), path(bam) from bam_sorted_channel 
+    tuple val(key), path(bam), val(input) from bam_sorted_channel 
     
     output:
-    tuple val(key), path("*.deduplicated.bam") into dedup_bam_ch, dedup_bam_ch2, dedup_bam_ch3
+    tuple val(key), path("*.deduplicated.bam"), val(input) into dedup_bam_ch, dedup_bam_ch2, dedup_bam_ch3
     path("*.MarkDuplicates.metrics.txt") into dedup_report_ch
 
     script:
@@ -230,32 +258,42 @@ process deduplication{
 
 //Combine replicates: split by '_', and group all samples
 dedup_bam_ch
-    .map { group_rep, bam ->
+    .map { group_rep, bam, input ->
                         def(group) = group_rep.split("_")  
-                        tuple( group, bam )
+                        tuple( group, bam, input )
                         }
     .groupTuple()
+    //Takes the first inputkey to avoid having nested tuples as inputkey
+    .map { group, bam, input ->
+                    tuple( group, bam, input.first() )
+
+    }
     .into { dedup_groupsplit_ch; dedup_groupsplit_ch2 }
+
+
 
 // Keep groups with more than 1 replicate, ready for combine replicates
 dedup_groupsplit_ch
         .map {
-            group, bams -> 
+            group, bams, input -> 
                         if (bams.size() != 1){ //Only keep 'groups' with >1 replicate
-                            tuple( groupKey(group, bams.size()), bams)
+                            tuple( groupKey(group, bams.size()), bams, input)
                         }
         }
         .set{bam_sorted_groups_ch}
 
+
+
 // Keep the individual replicates for inputs, if group has 1 replicate
 dedup_groupsplit_ch2
         .map {
-            group, bams -> 
+            group, bams, input -> 
                         if (bams.size() == 1 & group.contains('input')){ //Only keep 'groups' with >1 replicate
-                            tuple( groupKey(group, bams.size()), bams)
+                            tuple( groupKey(group, bams.size()), bams, input)
                         }
                 }
         .set{bam_single_inputs_ch}
+
 
 
 // Combine replicates based on 'sample_rep' format, all 'sample' bam files will be merged
@@ -265,10 +303,10 @@ process combine_replicates {
     publishDir "${params.outdir}/samtools/merge/${group}/", pattern:'*', mode: 'copy'
 
     input:
-    tuple val(group), path(bams) from bam_sorted_groups_ch
+    tuple val(group), path(bams), val(input) from bam_sorted_groups_ch
 
     output:
-    tuple val(group), file("*.merged.bam") into bam_merged_groups_ch
+    tuple val(group), file("*.merged.bam"), val(input) into bam_merged_groups_ch
 
     script:
     """
@@ -282,11 +320,13 @@ process combine_replicates {
 
 
 dedup_bam_ch2 //deduplicated bam files
-        .filter{ !it[0].contains('-input') } //remove all input files
+        .filter{ !it[0].contains('input') } //remove all input files
         .mix(bam_merged_groups_ch) //add merged inputs and IPs
         .mix(bam_single_inputs_ch) //add any individual replicates
         .set{bams_all_ch} //all input and IP bam files: tuple [sample, bam]
 
+
+//CHECKPOINT
 
 // samtools sort bam files
 process samtools_sort2 {
@@ -294,10 +334,11 @@ process samtools_sort2 {
     publishDir "${params.outdir}/samtools/", pattern:'*', mode: 'copy'
 
     input:
-    tuple val(key), path(bam) from bams_all_ch
+    tuple val(key), path(bam), val(input) from bams_all_ch
     
     output:
-    tuple val(key), path('*sort.bam') into bams_sorted_ch, bams_sorted_ch2, bams_sorted_ch3
+    tuple val(key), path('*sort.bam'), val(input) into bams_sorted_ch3
+    tuple val(key), path('*sort.bam') into bams_sorted_ch, bams_sorted_ch2
 
     
     script:
@@ -305,6 +346,8 @@ process samtools_sort2 {
     samtools sort $bam > ${key}.sort.bam
     """
 }
+
+
 
 
 process samtools_index {
@@ -329,6 +372,8 @@ process samtools_index {
 bams_sorted_ch2
             .join(bam_indexed_ch)
             .set{bam_sorted_indexed_ch}
+//CHECKPOINT
+
 
 
 
@@ -348,14 +393,10 @@ process bamCoverage {
     """
 }
 
+//CHECKPOINT
+//MATCH INPUT TO EACH CONTROL USING THE 3RD ELEMENT IN EACH TUPLE [SAMPLE_ID, BAM, [INPUT]].
+//NEW
 
-
-// Identify Input for each Control / Treatment and create channels
-// need: [sample, ipbam, controlbam]
-// based on file name containing -input
-
-
-//TODO: combine inputs with bam files for each sample. 
 bams_sorted_ch3 
         .branch{
             input: it[0].contains('input')
@@ -363,40 +404,23 @@ bams_sorted_ch3
         }
         .set {result}
 
-//all combinations,  then filter based on ones that the key and second key match string.
-//`DKO-input` -> split to `DKO`, then see if `DKO` is in ip string (`DKO_A`): yes
+//Match IP's to input's using the 3rd field.
+
 result.ip
-        .combine(result.input)
+        .combine(result.input) 
         .map{
-            ip, bam, input, bam2 ->
-                            def group = input.minus(~/-.*/)
-			    def ipgroup = ip.minus(~/_.*/)
-                            if(ipgroup.equals(group)){
+            ip, bam, ikey, input, bam2, na ->
+                            def ipgroup = ip.minus(~/_.*/)
+                            def inputkey = ikey.first()
+                            def inputgroup = input.minus(~/_.*/)
+
+                            if(inputkey.equals(inputgroup)){
                                 tuple(ip, bam, bam2)
+                                //tuple(ip, inputkey, input)
                             }
-
         }
-        .set{ ipbam_inputbam_ch }
+        .set { ipbam_inputbam_ch }
 
-
-        // .map { sample, bam ->
-        //                 def group = sample.minus('-input').minus(~/_.*/)
-        //                 tuple(group, bam)
-        //                 }
-        // .groupTuple(size: 2)
-        // .view()
-        // .map {
-        //     group, bams ->
-        //                 if(bams[0].getName().contains('-input')) {
-        //                     tuple( group, bams[1], bams[0])
-        //                 } 
-        //                 else if(bams[1].getName().contains('-input')) {
-        //                     tuple( group, bams[0], bams[1])
-        //                 }
-        // }
-        // .set {bam_ip_input_ch } 
-
-// bam_ip_input_ch.view()
 
 
 // macs2
