@@ -3,7 +3,7 @@
 
 #Non-test Samplesheets
 Samplesheets/*
-!Samplesheets/samples_largetest.csv
+!Samplesheets/samples_largetest_inputDependent2.csv
 
 #ignore work directory
 work

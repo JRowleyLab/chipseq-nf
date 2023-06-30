@@ -5,6 +5,8 @@ args <- commandArgs(trailingOnly = TRUE)
 
 xls <- args[1]
 fold_change <- as.numeric(args[2])
+outdir <- args[3]
+
 
 #libraries
 library(tidyverse)
@@ -19,6 +21,7 @@ diffpeaks %>%
 
 
 # Write filtered peaks files
-name = paste0("diffpeaks_",fold_change,"fc.tsv")
+sample_name = gsub(".xls", "", basename(xls))
+name = paste0(sample_name, "_diffpeaks_",fold_change,"log2fc.tsv")
 
-write.table(diffpeaks_out, file = name, sep = "\t", quote = F, row.names = F)
+write.table(diffpeaks_out, file = paste0(outdir, "/", name), sep = "\t", quote = F, row.names = F) # nolint

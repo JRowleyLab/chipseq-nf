@@ -5,14 +5,16 @@ A Nextflow pipeline for the end-to-end data processing of ChIP-seq paired-end da
 
 1. Clone the repository: `git clone <repo.git>`
 2. Create a singularity image from the nf-core Docker container: `singularity pull bsseq.sif docker://nolandocker/chipseq`
-3. Create a samplesheet csv (`samples.csv`) that contains `sample`, `read 1` and `read 2` information like below:
+3. Create a samplesheet csv (`samples.csv`) that contains `sample`, `read 1`, `read 2` and `input` information like below:
 
 **NOTE:** Use this exact format.
 
 ```
-sample_id,fastq_1,fastq_2
-Control_A,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>
-Control_B,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>
+sample_id,fastq_1,fastq_2,input
+Control_A,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,<input_sampleid(without(_rep))>
+Control_B,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,IgG
+IgG_A,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,NA
+IgG_B,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,NA
 ```
 
 4. Run the pipeline with the following code:
@@ -25,7 +27,7 @@ The sample name and replicate must be separated by "_" (eg. **Sample_Replicate**
 
 ## Parameters
 
-* `--samplesheet`: Samplesheet csv containing `sample_id,fastq_1,fastq_2`.
+* `--samplesheet`: Samplesheet csv containing `sample_id,fastq_1,fastq_2,input`.
 * `--outdir`: Output directory
 * `--index`: path to index 
 
