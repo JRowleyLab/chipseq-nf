@@ -13,6 +13,7 @@ A Nextflow pipeline for the end-to-end data processing of ChIP-seq paired-end da
 sample_id,fastq_1,fastq_2,input
 Control_A,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,<input_sampleid(without(_rep))>
 Control_B,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,IgG
+Treatment,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,IgG
 IgG_A,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,NA
 IgG_B,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,NA
 ```
@@ -24,6 +25,8 @@ IgG_B,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,NA
 ## Replicates
 
 The sample name and replicate must be separated by "_" (eg. **Sample_Replicate** OR **Control_A**). The pipeline will process single replicates AND combine replicates using `samtools merge`.
+
+Alternatively, if no replicates are used, omit the `_Replicate` completely or leave as `_A`.
 
 ## Parameters
 

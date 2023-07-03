@@ -433,7 +433,7 @@ process macs2 {
     tuple val(key), path(bamip), path(baminput) from ipbam_inputbam_ch
 
     output:
-    tuple val(key), path("*.narrowPeak"), path(bamip) into peaks_bam_ch, peaks_bam_ch2, peaks_bam_ch3
+    tuple val(key), path("*.broadPeak"), path(bamip) into peaks_bam_ch, peaks_bam_ch2, peaks_bam_ch3
     path("*.xls") into peaks_report_xls
     path("*")
 
@@ -445,7 +445,7 @@ process macs2 {
             -c $baminput \\
             -n $key \\
             -g hs \\
-            --call-summits 
+            --broad
     """ 
 }
 
@@ -574,7 +574,7 @@ process manorm{
             --p2 $peaks_control \\
              --r1 $bed_treatment \\
              --r2 $bed_control \\
-             --pf narrowpeak \\
+             --pf broadpeak \\
              --rf bed \\
              -o ${key_treatment}v${key_control}_dir
     """ 
