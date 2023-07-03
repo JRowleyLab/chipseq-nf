@@ -31,7 +31,7 @@ index_ch = Channel.value(file(params.index))
 Channel
         .from ( file(params.samplesheet) )
         .splitCsv(header:true, sep:',')
-        .map { row -> [ row.sample_id, [ file(row.fastq_1, checkIfExists: true), file(row.fastq_2, checkIfExists: true) ], row.input] }
+        .map { row -> [ row.sample_id, [ file(row.fastq_1, checkIfExists: true), file(row.fastq_2, checkIfExists: true) ], row.input, row.control] }
         .set { read_pairs_ch }
 
 
@@ -40,14 +40,13 @@ Channel
 read_pairs_ch
         .groupTuple()
         .branch {
-            meta, fastq, input ->
+            meta, fastq, input, control ->
                 single  : fastq.size() == 1
-                    return [ meta, fastq.flatten(), input.flatten() ]
+                    return [ meta, fastq.flatten(), input.flatten(), control.flatten() ]
                 multiple: fastq.size() > 1
-                    return [ meta, fastq.flatten(), input.flatten() ]
+                    return [ meta, fastq.flatten(), input.flatten(), control.flatten() ]
         }
         .set { ch_fastq }  
-
 
 process CAT_FASTQ {
     //nf-core
@@ -55,10 +54,10 @@ process CAT_FASTQ {
     publishDir "${params.outdir}/fastqMerged", mode: 'copy'
 
     input:
-    tuple val(sample_id), path(reads, stageAs: "input*/*"), val(input) from ch_fastq.multiple
+    tuple val(sample_id), path(reads, stageAs: "input*/*"), val(input), val(control) from ch_fastq.multiple
 
     output:
-    tuple val(sample_id), path("*.merged.fastq.gz"), val(input) into cat_out_ch
+    tuple val(sample_id), path("*.merged.fastq.gz"), val(input), val(control) into cat_out_ch
 
 
     script:
@@ -92,7 +91,7 @@ process fastqc {
     publishDir "${params.outdir}/fastqc", pattern:"{*.html,fastqc_${sample_id}_logs}", mode: 'copy'
 
     input:
-    tuple val(sample_id), path(reads), val(input) from cat_merged_ch
+    tuple val(sample_id), path(reads), val(input), val(control) from cat_merged_ch
 
     output:
     path("fastqc_${sample_id}_logs") into fastqc_ch
@@ -113,10 +112,10 @@ process trimming {
     publishDir "${params.outdir}/trimmed", pattern: "*.fq.gz", mode: 'copy'
 
     input: 
-    tuple val(key), path(reads), val(input) from cat_merged_ch2
+    tuple val(key), path(reads), val(input), val(control) from cat_merged_ch2
 
     output:
-    tuple val(key), path("*.fq.gz"), val(input) into ch_out_trimmomatic, ch_out_trimmomatic2
+    tuple val(key), path("*.fq.gz"), val(input), val(control) into ch_out_trimmomatic, ch_out_trimmomatic2
 
     script:
 
@@ -137,7 +136,7 @@ process fastqc_trimmed {
     publishDir "${params.outdir}/fastqc_trimmed", pattern:"{*.html,fastqc_${sample_id}_trimmed_logs}", mode: 'copy'
 
     input:
-    tuple val(sample_id), path(reads), val(input) from ch_out_trimmomatic
+    tuple val(sample_id), path(reads), val(input), val(control) from ch_out_trimmomatic
 
     output:
     path("fastqc_${sample_id}_trimmed_logs") into fastqc_trimmed_ch
@@ -157,11 +156,11 @@ process align {
     publishDir "${params.outdir}/alignment/$key/", pattern:'*', mode: 'copy'
 
     input:
-    tuple val(key), path(reads), val(input) from ch_out_trimmomatic2
+    tuple val(key), path(reads), val(input), val(control) from ch_out_trimmomatic2
     path(index) from index_ch  
 
     output:
-    tuple val(key), path("*bam"), val(input) into bam_ch, bam_ch2
+    tuple val(key), path("*bam"), val(input), val(control) into bam_ch, bam_ch2
     path("*.bowtie2.log"), optional: true into align_report_ch 
 
     script:
@@ -189,7 +188,7 @@ process samtools_stat_flagstat {
     publishDir "${params.outdir}/samtools/stats/", pattern:'*', mode: 'copy'
 
     input:
-    tuple val(key), path(bam), val(input) from bam_ch
+    tuple val(key), path(bam), val(input), val(control) from bam_ch
 
 
     output:
@@ -219,10 +218,10 @@ process samtools_sort {
     publishDir "${params.outdir}/samtools/bam/${key}/", pattern:'*', mode: 'copy'
 
     input:
-    tuple val(key), path(bam), val(input) from bam_ch2
+    tuple val(key), path(bam), val(input), val(control) from bam_ch2
     
     output:
-    tuple val(key), path('*sort.bam'), val(input) into bam_sorted_channel
+    tuple val(key), path('*sort.bam'), val(input), val(control) into bam_sorted_channel
 
     script:
     """
@@ -238,10 +237,10 @@ process deduplication{
     publishDir "${params.outdir}/picard/$key", pattern:"*", mode: 'copy'
 
     input:
-    tuple val(key), path(bam), val(input) from bam_sorted_channel 
+    tuple val(key), path(bam), val(input), val(control) from bam_sorted_channel 
     
     output:
-    tuple val(key), path("*.deduplicated.bam"), val(input) into dedup_bam_ch, dedup_bam_ch2, dedup_bam_ch3
+    tuple val(key), path("*.deduplicated.bam"), val(input), val(control) into dedup_bam_ch, dedup_bam_ch2, dedup_bam_ch3
     path("*.MarkDuplicates.metrics.txt") into dedup_report_ch
 
     script:
@@ -258,15 +257,14 @@ process deduplication{
 
 //Combine replicates: split by '_', and group all samples
 dedup_bam_ch
-    .map { group_rep, bam, input ->
+    .map { group_rep, bam, input, control ->
                         def(group) = group_rep.split("_")  
-                        tuple( group, bam, input )
+                        tuple( group, bam, input, control )
                         }
     .groupTuple()
     //Takes the first inputkey to avoid having nested tuples as inputkey
-    .map { group, bam, input ->
-                    tuple( group, bam, input.first() )
-
+    .map { group, bam, input, control ->
+                    tuple( group, bam, input.first(), control )
     }
     .into { dedup_groupsplit_ch; dedup_groupsplit_ch2 }
 
@@ -275,21 +273,24 @@ dedup_bam_ch
 // Keep groups with more than 1 replicate, ready for combine replicates
 dedup_groupsplit_ch
         .map {
-            group, bams, input -> 
+            group, bams, input, control -> 
                         if (bams.size() != 1){ //Only keep 'groups' with >1 replicate
-                            tuple( groupKey(group, bams.size()), bams, input)
+                            tuple( groupKey(group, bams.size()), bams, input, control)
                         }
         }
         .set{bam_sorted_groups_ch}
 
 
+// UPDATE: Separate out input samples by checking if it has been
+// used as an input across the samplesheet.
+
 
 // Keep the individual replicates for inputs, if group has 1 replicate
 dedup_groupsplit_ch2
         .map {
-            group, bams, input -> 
+            group, bams, input, control -> 
                         if (bams.size() == 1 & group.contains('input')){ //Only keep 'groups' with >1 replicate
-                            tuple( groupKey(group, bams.size()), bams, input)
+                            tuple( groupKey(group, bams.size()), bams, input, control)
                         }
                 }
         .set{bam_single_inputs_ch}
@@ -303,10 +304,10 @@ process combine_replicates {
     publishDir "${params.outdir}/samtools/merge/${group}/", pattern:'*', mode: 'copy'
 
     input:
-    tuple val(group), path(bams), val(input) from bam_sorted_groups_ch
+    tuple val(group), path(bams), val(input), val(control) from bam_sorted_groups_ch
 
     output:
-    tuple val(group), file("*.merged.bam"), val(input) into bam_merged_groups_ch
+    tuple val(group), file("*.merged.bam"), val(input), val(control) into bam_merged_groups_ch
 
     script:
     """
@@ -314,19 +315,24 @@ process combine_replicates {
     """
 }
   
+// Remove duplicated control value
+bam_merged_groups_ch
+    .map{
+        group, bam, input, control ->
+                            tuple(group, bam, input, control[0])
+    }
+    .set{ bam_merged_groups_ch2 }
+
 
 //mix replicates with merged groups. If any inputs could be merged (per cell type), use the merged inputs for all further samples of that group
 //Preferentially, only use merged inputs, if only 1 input is given for a cell type/ group, then use that one
 
-
 dedup_bam_ch2 //deduplicated bam files
         .filter{ !it[0].contains('input') } //remove all input files
-        .mix(bam_merged_groups_ch) //add merged inputs and IPs
-        .mix(bam_single_inputs_ch) //add any individual replicates
+        .mix(bam_merged_groups_ch2) //add merged inputs and IPs
+        .mix(bam_single_inputs_ch) //add any individual replicates // this is because as we're removing all inputs previously
         .set{bams_all_ch} //all input and IP bam files: tuple [sample, bam]
 
-
-//CHECKPOINT
 
 // samtools sort bam files
 process samtools_sort2 {
@@ -334,10 +340,10 @@ process samtools_sort2 {
     publishDir "${params.outdir}/samtools/", pattern:'*', mode: 'copy'
 
     input:
-    tuple val(key), path(bam), val(input) from bams_all_ch
+    tuple val(key), path(bam), val(input), val(control) from bams_all_ch
     
     output:
-    tuple val(key), path('*sort.bam'), val(input) into bams_sorted_ch3
+    tuple val(key), path('*sort.bam'), val(input), val(control) into bams_sorted_ch3
     tuple val(key), path('*sort.bam') into bams_sorted_ch, bams_sorted_ch2
 
     
@@ -346,8 +352,6 @@ process samtools_sort2 {
     samtools sort $bam > ${key}.sort.bam
     """
 }
-
-
 
 
 process samtools_index {
@@ -372,9 +376,6 @@ process samtools_index {
 bams_sorted_ch2
             .join(bam_indexed_ch)
             .set{bam_sorted_indexed_ch}
-//CHECKPOINT
-
-
 
 
 process bamCoverage {
@@ -391,11 +392,10 @@ process bamCoverage {
     """
     bamCoverage -b $bam -o ${key}.bw --normalizeUsing BPM
     """
-}
+} 
 
-//CHECKPOINT
+
 //MATCH INPUT TO EACH CONTROL USING THE 3RD ELEMENT IN EACH TUPLE [SAMPLE_ID, BAM, [INPUT]].
-//NEW
 
 bams_sorted_ch3 
         .branch{
@@ -406,22 +406,27 @@ bams_sorted_ch3
 
 //Match IP's to input's using the 3rd field.
 
+// result.ip
+//         .combine(result.input) 
+//         .view()
+
+
+// return
+
 result.ip
         .combine(result.input) 
         .map{
-            ip, bam, ikey, input, bam2, na ->
+            ip, bam, ikey, control, input, bam2, na2, na3  ->
                             def ipgroup = ip.minus(~/_.*/)
                             def inputkey = ikey.first()
                             def inputgroup = input.minus(~/_.*/)
 
                             if(inputkey.equals(inputgroup)){
-                                tuple(ip, bam, bam2)
+                                tuple(ip, bam, bam2, control)
                                 //tuple(ip, inputkey, input)
                             }
         }
         .set { ipbam_inputbam_ch }
-
-
 
 // macs2
 
@@ -430,10 +435,10 @@ process macs2 {
     publishDir "${params.outdir}/macs2/$key", pattern:"*", mode: 'copy'
 
     input:
-    tuple val(key), path(bamip), path(baminput) from ipbam_inputbam_ch
+    tuple val(key), path(bamip), path(baminput), val(control) from ipbam_inputbam_ch
 
     output:
-    tuple val(key), path("*.broadPeak"), path(bamip) into peaks_bam_ch, peaks_bam_ch2, peaks_bam_ch3
+    tuple val(key), path("*.broadPeak"), path(bamip), val(control) into peaks_bam_ch, peaks_bam_ch2, peaks_bam_ch3
     path("*.xls") into peaks_report_xls
     path("*")
 
@@ -458,7 +463,7 @@ process MULTIQC_CUSTOM_PEAKS {
     tag "$key" 
 
     input:
-    tuple val(key), path(peak), path(bam) from peaks_bam_ch
+    tuple val(key), path(peak), path(bam), val(control) from peaks_bam_ch
     path(peak_count_header) from peak_count_header_ch
 
     output:
@@ -475,10 +480,10 @@ process bamToBed {
     tag "$key" 
 
     input:
-    tuple val(key), path(peak), path(bam) from peaks_bam_ch2
+    tuple val(key), path(peak), path(bam), val(control) from peaks_bam_ch2
 
     output:
-    tuple val(key), path(peak), path("*.bed") into bed_ch, bed_ch2 
+    tuple val(key), path(peak), path("*.bed"), val(control) into bed_ch, bed_ch2 
 
     script:
     """
@@ -491,31 +496,87 @@ process bamToBed {
 // input 
 // [T1, [T1.bam, T1.narrowPeak], [control.bam, control.narrowPeak]] ...
 
+// BELOW: The way I match input and IPs together
+// result.ip
+//         .combine(result.input) 
+//         .map{
+//             ip, bam, ikey, control, input, bam2, na2, na3  ->
+//                             def ipgroup = ip.minus(~/_.*/)
+//                             def inputkey = ikey.first()
+//                             def inputgroup = input.minus(~/_.*/)
 
-// Control
-bed_ch
-            .map {
-                    group, peak, bed ->
-                                if(group.contains('control')) {
-                                    tuple( group, peak, bed )
-                                } 
-                    }
-                    .set { control_peaks_bed_ch } 
+//                             if(inputkey.equals(inputgroup)){
+//                                 tuple(ip, bam, bam2, control)
+//                                 //tuple(ip, inputkey, input)
+//                             }
+//         }
+//         .set { ipbam_inputbam_ch }
 
-// Treatments
-bed_ch2
-            .map {
-                    group, peak, bed ->
-                                if(!group.contains('control')) {
-                                    tuple( group, peak, bed )
-                                } 
-                    }
-                    .set { treatment_peaks_bed_ch } 
 
-// Combine Treatment with Control
-treatment_peaks_bed_ch
-                    .combine(control_peaks_bed_ch)
-                    .set {treat_cont_ch}
+
+// UPDATE: USE a 5th column that, similarly to the input string match, uses the basename to
+// allow the user to assign a control for each experiment. Any sample being used as a control can
+// have an NA value
+
+
+// Split based on control or not
+// Take 3rd element [0 indexed], strip it from tuple with [0]
+bed_ch 
+    .map{
+        key, peak, bed, control ->
+                tuple(key, peak, bed, control[0])
+    }
+    .branch{
+        control: it[3].equals('NA')
+        treatment: !it[3].equals('NA')
+    }
+    .set {result}
+
+
+//result.control.view()
+//result.treatment.view()
+
+// BELOW: The way I match input and IPs together
+result.treatment
+        .combine(result.control) 
+        .map{
+            key, peaks, bed, control, key_control, peaks_control, bed_control, control_control  ->
+                            def controlgroup = key_control.minus(~/_.*/)
+                            // def controlkey = control
+                            //def inputgroup = input.minus(~/_.*/)
+
+                            if(control.equals(controlgroup)){
+                                tuple(key, peaks, bed, key_control, peaks_control, bed_control)
+                                //tuple(ip, inputkey, input)
+                            }
+        }
+        .set { macs2_controlmatched_ch }
+
+
+// // Control
+// bed_ch
+//             .map {
+//                     group, peak, bed ->
+//                                 if(group.contains('control')) {
+//                                     tuple( group, peak, bed )
+//                                 } 
+//                     }
+//                     .set { control_peaks_bed_ch } 
+
+// // Treatments
+// bed_ch2
+//             .map {
+//                     group, peak, bed ->
+//                                 if(!group.contains('control')) {
+//                                     tuple( group, peak, bed )
+//                                 } 
+//                     }
+//                     .set { treatment_peaks_bed_ch } 
+
+// // Combine Treatment with Control
+// treatment_peaks_bed_ch
+//                     .combine(control_peaks_bed_ch)
+//                     .set {treat_cont_ch}
 
 // Concept for allowing MAnorm to compare combinations of all samples. Need to handle this correctly to avoid huge numbers of comparisons.
 // if (params.manormGroup){
@@ -562,7 +623,7 @@ process manorm{
     publishDir "${params.outdir}/manorm/${key_treatment}", pattern:"*", mode: 'copy'
 
     input:
-    tuple val(key_treatment), path(peaks_treatment), path(bed_treatment), val(key_control), path(peaks_control), path(bed_control) from treat_cont_ch
+    tuple val(key_treatment), path(peaks_treatment), path(bed_treatment), val(key_control), path(peaks_control), path(bed_control) from macs2_controlmatched_ch
 
     output:
     path('*_dir') into manorm_dir_ch

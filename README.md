@@ -10,12 +10,12 @@ A Nextflow pipeline for the end-to-end data processing of ChIP-seq paired-end da
 **NOTE:** Use this exact format.
 
 ```
-sample_id,fastq_1,fastq_2,input
-Control_A,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,<input_sampleid(without(_rep))>
-Control_B,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,IgG
-Treatment,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,IgG
-IgG_A,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,NA
-IgG_B,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,NA
+sample_id,fastq_1,fastq_2,input,control
+Control_A,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,<input_sampleid(without(_rep))>,NA
+Control_B,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,IgG,NA
+Treatment,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,IgG,Control
+IgG_A,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,NA,NA
+IgG_B,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,NA,NA
 ```
 
 4. Run the pipeline with the following code:
@@ -30,7 +30,7 @@ Alternatively, if no replicates are used, omit the `_Replicate` completely or le
 
 ## Parameters
 
-* `--samplesheet`: Samplesheet csv containing `sample_id,fastq_1,fastq_2,input`.
+* `--samplesheet`: Samplesheet csv containing `sample_id,fastq_1,fastq_2,input,control`.
 * `--outdir`: Output directory
 * `--index`: path to index 
 
