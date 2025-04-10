@@ -40,4 +40,6 @@ The pipeline can be tested with the following command `nextflow run main.nf --in
 
 ## Singularity
 
-The singularity image generated can be used with `-with-singularity <path/to/image>` or by placing the path in the `nextflow.config` file.
+The singularity image generated can be used with `-with-singularity <path/to/image>` or by placing the path in the `nextflow.config` file. 
+
+Download the Docker image via singularity with: `singularity pull -F chipseq.sif docker://nolandocker/chipseq:latest`
