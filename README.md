@@ -4,18 +4,18 @@ A Nextflow pipeline for the end-to-end data processing of ChIP-seq paired-end da
 ## How to use
 
 1. Clone the repository: `git clone <repo.git>`
-2. Create a singularity image from the nf-core Docker container: `singularity pull bsseq.sif docker://nolandocker/chipseq`
+2. Create a singularity image from the nf-core Docker container: `singularity pull chipseq.sif docker://nolandocker/chipseq`
 3. Create a samplesheet csv (`samples.csv`) that contains `sample`, `read 1`, `read 2` and `input` information like below:
 
 **NOTE:** Use this exact format.
 
 ```
-sample_id,fastq_1,fastq_2,input,control
-Control_A,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,<input_sampleid(without(_rep))>,NA
-Control_B,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,IgG,NA
-Treatment,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,IgG,Control
-IgG_A,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,NA,NA
-IgG_B,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,NA,NA
+sample_id,fastq_1,fastq_2,input
+Control_A,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,IgG
+Control_B,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,IgG
+Treatment,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,IgG
+IgG_A,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,NA
+IgG_B,<path/to/read_1.fq.gz>,<path/to/read_2.fq.gz>,NA
 ```
 
 4. Run the pipeline with the following code:
