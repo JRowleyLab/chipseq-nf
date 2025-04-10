@@ -1,9 +1,0 @@
-sample_id,fastq_1,fastq_2
-control_A,./data/WT_Rad21_A_R1.1m.fastq.gz,./data/WT_Rad21_A_R2.1m.fastq.gz
-control-input_A,./data/WT_IgG_A_R1.1m.fastq.gz,./data/WT_IgG_A_R2.1m.fastq.gz
-control_B,./data/WT_Rad21_B_R1.1m.fastq.gz,./data/WT_Rad21_B_R2.1m.fastq.gz
-control-input_B,./data/WT_IgG_B_R1.1m.fastq.gz,./data/WT_IgG_B_R2.1m.fastq.gz
-DKO_A,./data/DKO_Rad21_A_R1.1m.fastq.gz,./data/DKO_Rad21_A_R2.1m.fastq.gz
-DKO-input_A,./data/DKO_IgG_A_R1.1m.fastq.gz,./data/DKO_IgG_A_R2.1m.fastq.gz
-DKO_B,./data/DKO_Rad21_B_R1.1m.fastq.gz,./data/DKO_Rad21_B_R2.1m.fastq.gz
-DKO-input_B,./data/DKO_IgG_B_R1.1m.fastq.gz,./data/DKO_IgG_B_R2.1m.fastq.gz
