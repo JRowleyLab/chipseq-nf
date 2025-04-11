@@ -8,7 +8,7 @@ process MACS3 {
     tuple val(key), path(bamip), path(baminput)
 
     output:
-    path("*eak"), emit: peak
+    tuple val(key), path("*eak"), emit: peak
     path("*.xls"), emit: excel
     path("*"), emit: allelse
 

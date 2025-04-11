@@ -16,12 +16,13 @@ include { SAMTOOLS_MERGE } from './modules/samtools_merge.nf'
 include { SAMTOOLS_INDEX } from './modules/samtools_index.nf'
 include { BAM_COVERAGE } from './modules/bam_coverage.nf'
 include { MACS3 } from './modules/macs3.nf'
-// include { MULTIQC } from './modules/multiqc.nf'
+include { MULTIQC } from './modules/multiqc.nf'
+include { MULTIQC_CUSTOM_PEAKS } from './modules/multiqc_custompeaks.nf'
 
 
 log.info """\
          ===================================
-         D P C S E Q - N F  P I P E L I N E    
+         C h I P S E Q - N F  P I P E L I N E    
          ===================================
          outdir       : ${params.outdir}
          samplesheet  : ${params.samplesheet}
@@ -146,8 +147,6 @@ workflow {
         .mix(bam_single_inputs_ch) //add any individual replicates // this is because as we're removing all inputs previously
         .set{bams_all_ch} //all input and IP bam files: tuple [sample, bam]
 
-    //bams_all_ch | view
-
     // Sort all bam files
     SAMTOOLS_SORT2( bams_all_ch )
     bams_all_sorted_winput = SAMTOOLS_SORT2.out.winput
@@ -196,5 +195,27 @@ workflow {
             .set { ipbam_inputbam_ch }
 
     // MACS3 for peak calling
-    MACS3( ipbam_inputbam_ch )
+    macs3_ch = MACS3( ipbam_inputbam_ch )
+    macs3_keypeak = macs3_ch.peak
+    macs3_excel = macs3_ch.excel
+
+    // Read in header for MULTIQC
+    peak_count_header_ch = Channel.fromPath("$projectDir/peak_count_header.txt", checkIfExists: true).toList()
+    // GENERATE custom peak count entry for multiqc
+    custom_peaks_multiqc = MULTIQC_CUSTOM_PEAKS(macs3_keypeak, peak_count_header_ch)
+
+    // MULTIQC
+    // Create multiqc report channel
+    multiqc_ch = fastqc
+                        .mix(fastqc_trim)
+                        .mix(bowtie2_summary)                    
+                        .mix(bowtie2_sort_dedup_text)
+                        .mix(macs3_excel)
+                        .mix(custom_peaks_multiqc)
+                        .collect()
+
+    // Run MULTIQC
+    MULTIQC( multiqc_ch )
+
+    // END
 }
